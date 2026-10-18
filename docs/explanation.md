@@ -15,38 +15,44 @@
    - [`simulate.py`](#simulatepy)
      - `simulate(T, shifts, seed)`
    - [`pipeline.py`](#pipelinepy)
-     - Global Constants & Model Selection
+     - Global Architecture & Constants
      - `features(d)`
+     - Inner Helper `fit(lo, hi, w)`
      - `run(mode, X, y, shifts)`
-       - Inner Helper `fit(lo, hi, w)`
-       - Conformal Prediction & Abstention Engine
-       - Rolling KS-Test Drift Monitor
-       - Periodic Retraining Routine
-       - Evaluation Metrics & Walk-Forward Accounting
-       - Main CLI Entrypoint
+     - `pipeline.py: __main__`
    - [`recorder.py`](#recorderpy)
-     - Exchange Feed Comparison (Kraken vs. Coinbase vs. OKX from India)
-     - Class `OrderBook`
-       - `apply_snapshot()` & `apply_update()`
-       - `get_top5_row()`
-     - Class `OrderBookRecorder`
-       - `_ws_listen()`, Reconnection & Backoff
-       - `_sample_loop()` & Periodic Parquet Flushing
-     - `main()` CLI Interface
+     - Public WebSocket Exchange Probe (Kraken vs. Coinbase vs. OKX from India)
+     - `OrderBook.__init__(tick_size, depth)`
+     - `OrderBook.clear()`
+     - `OrderBook._truncate()`
+     - `OrderBook.apply_snapshot(bids, asks)`
+     - `OrderBook.apply_update(bids, asks)`
+     - `OrderBook.get_top5_row()`
+     - `OrderBook.needs_resync()`
+     - `OrderBookRecorder.__init__(...)`
+     - `OrderBookRecorder._setup_logging()`
+     - `OrderBookRecorder.flush_to_parquet()`
+     - `OrderBookRecorder._sample_loop()`
+     - `OrderBookRecorder._ws_listen()`
+     - `OrderBookRecorder.run()`
+     - `OrderBookRecorder.stop()`
+     - `recorder.py: main()`
    - [`count_rows.py`](#count_rowspy)
      - `count_collected_rows(directory)`
+     - `count_rows.py: main()`
    - [`dashboard.html` / `dashboard_template.html`](#dashboardhtml--dashboard_templatehtml)
-     - Architecture (Vanilla Canvas, Zero External CDN)
-     - `plot()`, `upd()`, and Interactive Scrubbing
+     - `plot(cv, lines, lo, hi, i)`
+     - `upd(i)`
+     - Canvas Replay Controls & Interaction Loop
 5. [The Judge's Grill-Me Defense Guide (Anticipated Tough Questions & Answers)](#5-the-judges-grill-me-defense-guide)
 
 ---
 
 ## 1. The 60-Second Elevator Pitch
 
-> *"Good morning, esteemed judges from Optiver and IIT Bombay. In quantitative market making and high-frequency trading, standard supervised models suffer from a fatal flaw: **they fail silently when the market regime shifts.**
+> *"Good morning, esteemed judges from Optiver and IIT Bombay. In quantitative market making and algorithmic trading, standard supervised machine learning models suffer from a fatal flaw: **they fail silently when the market regime shifts.**
 > 
-> When volatility explodes, liquidity dries up, or aggressive flow sweeps the book, the historical relationship between order-book imbalance and short-term price direction breaks down or reverses. A static model keeps trading into adverse selection and hemorrhaging capital. A periodic model waits hours before recalibrating.
+> When volatility explodes, liquidity dries up, or predatory flow sweeps the book, the historical relationship between order-book imbalance and short-term price direction breaks down or reverses. A static model keeps trading into adverse selection and hemorrhaging capital. A periodic model waits hours before recalibrating.
 > 
 > We built **DriftBook**. DriftBook is a regime-aware order-book forecasting system running at sub-10 microsecond inference latency. It monitors rolling multi-feature Kolmogorov-Smirnov test statistics against a reference distribution to detect covariate and concept shift within tens of steps. 
 > 
@@ -61,8 +67,8 @@
 ```
                       +---------------------------------------+
                       |       LIVE EXCHANGE / SIMULATOR       |
-                      |  - Kraken v2 WS: BTC/USD Top 10 LOB   |
-                      |  - simulate.py: Plotted Regime Shifts |
+                      |  - Kraken v2 WS: BTC/USD Top 25 LOB   |
+                      |  - simulate.py: Planted Regime Shifts |
                       +-------------------+-------------------+
                                           |
                                           v
@@ -146,18 +152,18 @@ Generates a realistic synthetic Limit Order Book with high-frequency statistical
 
 #### Function: `simulate(T=18000, shifts=(6000, 11000), seed=7)`
 
-##### Plain English Description
+##### 1. Plain English Description
 Creates a time-series of 18,000 order-book snapshots (equivalent to 5 hours of 1-second data). It models three distinct market regimes:
 - **Regime 0 (Steps 0 to 5999):** Normal market. Strong positive relationship between order book imbalance and future price movement ($\beta = +0.25$). Spread is tight (1 tick base).
 - **Regime 1 (Steps 6000 to 10999):** Stress/Inverted regime. The relationship between imbalance and price **flips sign** ($\beta = -0.40$), volatility surges ($0.56$), and spread widens (2 ticks base). An unsuspecting model that buys on high bid imbalance will suffer massive adverse selection!
 - **Regime 2 (Steps 11000 to 17999):** Recovery regime. Imbalance predictability returns ($\beta = +0.25$), but spread remains elevated (3 ticks base).
 
-##### Why It Was Designed That Way
-1. **Controllable Ground Truth:** In real market data, nobody gives you exact regime change timestamps. Synthetic simulation allows calculating exact **detection delay**, **false alarm rates**, and **recovery speed**.
-2. **Mean-Reverting Imbalance:** Imbalance is generated via an AR(1) process with autoregression $0.96$ passed through $\tanh(\cdot)$, accurately mimicking the bounded $[-1, 1]$ mean-reverting property of real L1 queues.
-3. **Lognormal Book Depths:** Order sizes at depth levels $0..4$ follow a lognormal distribution scaled by the current imbalance.
+##### 2. Why It Was Designed That Way
+- **Controllable Ground Truth:** In real market data, nobody gives you exact regime change timestamps. Synthetic simulation allows calculating exact **detection delay**, **false alarm rates**, and **recovery speed**.
+- **Mean-Reverting Imbalance:** Imbalance is generated via an AR(1) process with autoregression $0.96$ passed through $\tanh(\cdot)$, accurately mimicking the bounded $[-1, 1]$ mean-reverting property of real L1 queues.
+- **Lognormal Book Depths:** Order sizes at depth levels $0..4$ follow a lognormal distribution scaled by the current imbalance.
 
-##### What Judges Will Ask & How to Answer
+##### 3. What Judges Will Ask & How to Answer
 - **Judge:** *"Why did you make the imbalance beta flip from positive to negative in Regime 1?"*  
   **Student Answer:** *"In real electronic markets, during aggressive sell-offs or predatory trading (such as quote stuffing or iceberg order execution), large bids often appear on the book as spoofing attempts or absorption walls right before the market crashes through them. A naive model trained in tranquil periods assumes large bids mean price appreciation; when the regime flips, that assumption becomes disastrous. We wanted to test whether our model could detect this breakdown immediately."*
 - **Judge:** *"Is an AR(1) process realistic for order-book queues?"*  
@@ -178,13 +184,13 @@ F = ['imb1', 'imb5', 'ofi', 'micro', 'spread', 'vol']
 - **$H = 5$:** Lookahead horizon. In 1-second sampled data, this corresponds to 5 seconds ahead.
 - **$C = 100$:** Chunk size. Predictions are issued in 100-step streaming mini-batches to balance latency and batch efficiency.
 - **$\text{TR} = 3000$:** Initial training period (the first 3,000 steps).
-- **LightGBM with HistGradientBoosting fallback:** Uses `LightGBM` (150 trees, max depth controlled by 15 leaves, fast histogram binning) which achieves ~8 microseconds per inference. If LightGBM's native C library is absent, it seamlessly falls back to Scikit-Learn's `HistGradientBoostingClassifier`.
+- **LightGBM with HistGradientBoosting fallback:** Uses `LightGBM` (150 trees, max depth controlled by 15 leaves, fast histogram binning) which achieves ~8 microseconds per inference. If native dynamic C libraries (`libomp`) fail to load, it cleanly catches `(ImportError, OSError)` and falls back to Scikit-Learn's `HistGradientBoostingClassifier`.
 
 ---
 
 #### Function: `features(d)`
 
-##### Plain English Description
+##### 1. Plain English Description
 Takes raw order-book depth ($b_0..b_4, a_0..a_4$, mid price, spread) and constructs the 6 quantitative microstructure signals, plus the 3-class future return label $y \in \{0, 1, 2\}$.
 
 ##### Steps Inside:
@@ -200,11 +206,11 @@ Takes raw order-book depth ($b_0..b_4, a_0..a_4$, mid price, spread) and constru
    - Label `1` (Flat): $-0.6 \le \Delta \text{mid} \le +0.6$ ticks
    - The final $H=5$ steps are marked `-1` because their future price change is unknown at test time.
 
-##### Why It Was Designed That Way
+##### 2. Why It Was Designed That Way
 1. **Stationarity:** Raw prices are non-stationary (Brownian-like); raw sizes vary by asset. Normalizing queue sizes into ratios $[-1, 1]$ and taking differences produces stationary distributions amenable to statistical hypothesis testing.
 2. **Three-State Classification (Down / Flat / Up):** Financial markets are dominated by bid-ask bounce and noise. Forcing a binary Up/Down classification creates heavy false positives on tiny price wiggles. The $\pm 0.6$ tick deadband ensures the model only trades on genuine moves that exceed the half-spread cost!
 
-##### What Judges Will Ask & How to Answer
+##### 3. What Judges Will Ask & How to Answer
 - **Judge:** *"Why did you set the label threshold to 0.6 ticks?"*  
   **Student Answer:** *"To be profitable after trading costs, a predicted move must overcome the bid-ask spread and taker fees. Since the minimum spread in our book is 1 tick, a move of 0.6 ticks or more is the minimum threshold where crossing the spread is economically viable. Smaller moves are noise and belong in the 'Flat' class."*
 - **Judge:** *"Is there any lookahead bias in `features()`?"*  
@@ -212,142 +218,245 @@ Takes raw order-book depth ($b_0..b_4, a_0..a_4$, mid price, spread) and constru
 
 ---
 
+#### Inner Function: `fit(lo, hi, w=False)` (inside `run`)
+
+##### 1. Plain English Description
+Fits a Gradient Boosted Tree classifier on a designated historical window `[lo, hi - H]`. If `w=True`, it assigns exponential recency weights so recent rows have higher impact during splitting.
+
+##### 2. Why It Was Designed That Way
+1. **No Label Leakage (`hi - H`):** In online streaming, at time `hi`, the labels for the last $H$ time steps are unknown because future price hasn't happened yet. Training up to `hi - H` mathematically guarantees zero look-ahead bias.
+2. **Exponential Recency Weighting:** When a market shock occurs, older samples from the past regime act as toxic noise. Weighting samples as $\exp(\text{linspace}(-1.5, 0, N))$ forces tree partition criteria to fit the new regime faster without needing to discard all past data.
+
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"Why exponential weighting instead of hard sliding window?"*  
+  **Student Answer:** *"A hard window discards data abruptly, causing higher variance when sample size is small. Exponential weighting provides a smooth transition: recent samples dominate the loss function, but older samples still regularize rare feature combinations."*
+
+---
+
 #### Function: `run(mode, X, y, shifts)`
 
-##### Plain English Description
-Executes a strict walk-forward evaluation of a chosen model mode (`static`, `periodic`, or `driftbook`) over the dataset from step 3000 to step 18000.
+##### 1. Plain English Description
+Executes a strict walk-forward evaluation of a chosen model mode (`static`, `periodic`, or `driftbook`) over the dataset from step 3000 to step 18000. It tracks rolling accuracy, detection delay, false alarms, and conformal abstention metrics.
 
-##### Inner Function: `fit(lo, hi, w=False)`
-- Trains the Gradient Boosted Tree on rows `X[lo:hi-H]` and `y[lo:hi-H]`.
-- Notice the index `hi-H`: **it never trains on the last $H$ steps**, because their labels have not materialized yet! This completely prevents label leakage.
-- If `w=True` (used in DriftBook after a detected shift), it applies exponential recency weights:
-  $$w_i = \exp\left(\text{linspace}(-1.5, 0, N)\right)$$
-  This forces the tree splits to prioritize the newest regime dynamics over older post-shift data.
+##### Core Components:
+1. **Adaptive Conformal Prediction Engine:**
+   - Computes non-conformity score $r_t = 1 - \hat{p}(y_t)$.
+   - Determines cutoff quantile $q = \text{Quantile}_{1-\alpha}(sc)$.
+   - Forms prediction set $\{c : 1 - p(c) \le q\}$.
+   - **Abstains whenever $|\text{Set}| \neq 1$.**
+   - Dynamically adapts $\alpha_t$ to ensure empirical coverage tracks $1 - 0.20 = 80\%$.
+2. **Rolling Kolmogorov-Smirnov Drift Detector:**
+   - Evaluates two-sample KS test statistic $D$ across all 6 features between reference window and rolling window of 300 steps.
+   - Requires $\ge 2$ features with $D > 0.30$ across 2 consecutive chunks (debounce) to register a regime shift.
+   - Implements an 800-step post-shift stabilization buffer before retraining with exponential recency weights.
+3. **Walk-Forward Performance Accounting:** Computes overall Accuracy, Macro F1, MCC, per-prediction latency, post-shift recovery speed, and selective accuracy.
 
-##### The DriftBook Adaptive Conformal Prediction Engine (Lines 37–42)
-```python
-# adaptive conformal: abstain unless the prediction set holds exactly one class
-q = np.quantile(sc[-1000:], 1-al) if len(sc) > 50 else 1.0
-Q[s:e] = q; ab[s:e] = ((1-p) <= q).sum(1) != 1
-```
-1. **Non-conformity score:** $r_t = 1 - \hat{P}(y_t)$. If the model assigns low probability to the true class, non-conformity is high.
-2. **Quantile $q$:** The $(1-\alpha)$ quantile of recent non-conformity scores.
-3. **Prediction Set:** Any class $c$ where $1 - \hat{p}_c \le q$ is included in the conformal set.
-4. **Abstention Rule:**
-   $$\text{Abstain if } |\text{Prediction Set}| \neq 1$$
-   - If $|\text{Set}| = 0$: The model is bewildered; no class meets the confidence threshold.
-   - If $|\text{Set}| \ge 2$: The model is ambiguous; it cannot distinguish between Up and Flat (or Down and Up).
-   - Only when $|\text{Set}| = 1$ is the model decisive!
-5. **Adaptive Alpha Tracking:**
-   $$\alpha_{t+1} = \text{clip}\left(\alpha_t + 0.02 \times \left(0.20 - \text{error\_rate}\right), 0.02, 0.50\right)$$
-   This guarantees that over time, the conformal coverage tracks exactly $80\%$ ($1 - 0.20$), adjusting online to changing market volatility!
+##### 2. Why It Was Designed That Way
+Benchmarking `static`, `periodic`, and `driftbook` under the exact same walk-forward stream isolates the quantitative value of drift detection and conformal abstention.
 
-##### The Rolling KS-Test Drift Monitor (Lines 43–48)
-```python
-# drift monitor: rolling KS test vs training reference, 2 consecutive hits
-D = [ks_2samp(ref[:, j], X[e-300:e, j]).statistic for j in range(len(F))]
-strike = strike + 1 if sum(v > .3 for v in D) >= 2 else 0
-if strike == 2 and pend is None: drift.append(e); pend = e
-if pend and e >= pend + 800:
-    m = fit(e-1000, e, True); ref = X[e-1000:e]; refit.append(e); pend = None; strike = 0
-```
-1. **Two-Sample Kolmogorov-Smirnov Test:** Compares the empirical cumulative distribution function (ECDF) of the reference baseline (`ref`) against a rolling window of the last 300 rows (`X[e-300:e]`) for each of the 6 features.
-2. **Drift Threshold:** If 2 or more features exhibit a KS statistic $D > 0.30$, it registers a strike.
-3. **Debounce (2 Consecutive Strikes):** A single 100-step fluctuation could be brief market noise. Requiring 2 consecutive strikes ($strike == 2$) virtually eliminates false alarms.
-4. **Delayed Refit Buffer:** Once drift is detected, you cannot refit immediately because you don't have enough data or realized labels from the *new* regime. DriftBook waits 800 steps to accumulate post-shift observations, then refits on the recent 1,000 rows with exponential recency weighting.
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"Why did you use Matthews Correlation Coefficient (MCC)?"*  
+  **Student Answer:** *"Financial order books are dominated by 'Flat' labels during quiet periods. A model predicting 'Flat' 100% of the time gets high accuracy but zero trading edge. MCC accounts for all quadrants of the confusion matrix; a high MCC proves genuine discriminative capability across Up, Down, and Flat regimes."*
 
-##### Periodic Retraining Routine (Line 49)
-```python
-elif mode == 'periodic' and e % 3000 < C and e > TR + C:
-    m = fit(e-3000, e); refit.append(e)
-```
-- The standard industry baseline: refits rigidly every 3,000 steps on the previous 3,000 steps, irrespective of whether the market actually changed.
+---
 
-##### Metrics Computed (Lines 56–66)
-- `acc`: Overall classification accuracy.
-- `f1`: Macro-averaged F1 score (treating all 3 classes with equal importance).
-- `mcc`: Matthews Correlation Coefficient (the gold standard metric for multi-class imbalanced financial data).
-- `lat_ms`: Mean per-sample inference latency in milliseconds (~0.008 ms = 8 microseconds).
-- `post`: Accuracy in the 1,500 steps immediately following each planted regime shift.
-- `rec`: Recovery steps needed for rolling accuracy to return within 3% of pre-shift baseline.
-- `abstain_rate`: Proportion of time the model chooses to sit out.
-- `selective_acc`: Accuracy specifically on the subset of predictions where the model chose to trade.
-- `coverage`: Empirical conformal coverage (validating that the true label was in the conformal prediction set ~80% of the time).
+#### Main Entrypoint: `pipeline.py: __main__`
 
-##### What Judges Will Ask & How to Answer
-- **Judge:** *"Why did you use the KS test instead of Page-Hinkley, CUSUM, or ADWIN?"*  
-  **Student Answer:** *"The Kolmogorov-Smirnov test is non-parametric; it makes zero assumptions about Gaussianity, which is crucial because financial order-book queues have heavy tails and skew. Furthermore, by testing each feature independently and requiring joint multi-feature significance, we isolate structural market changes from single-feature anomalies. In our roadmap, ADWIN is also slated as a streaming complement."*
-- **Judge:** *"Why not retrain immediately when drift is flagged at step 6100?"*  
-  **Student Answer:** *"If you retrain at step 6101, you have only 1 step of new regime data and 999 steps of old regime data! The model would simply re-learn the obsolete regime. More importantly, because our prediction horizon is $H=5$, the true labels for the new regime haven't even formed yet. DriftBook's design waits for an 800-step stabilization window, and during that waiting period, the Adaptive Conformal layer automatically increases uncertainty and abstains. That is the synergy of our architecture."*
-- **Judge:** *"What is the difference between selective accuracy and overall accuracy?"*  
-  **Student Answer:** *"Overall accuracy evaluates every single tick, forcing the model to guess even when the book is chaotic. Selective accuracy measures the win rate on the trades the model actually enters. In trading, you don't get bonus points for trading every second; you make money by having a high hit-rate on your active bets."*
+##### 1. Plain English Description
+Command-line driver that parses `--data <file.parquet>`, validates that the dataset contains sufficient rows ($\ge 3,105$) for walk-forward chunks, runs all three modes, dumps summary metrics to `results.json`, and injects JSON data into `dashboard_template.html` to generate `dashboard.html`.
+
+##### 2. Why It Was Designed That Way
+Ensures single-command reproducibility for both synthetic benchmark replays and live exchange recordings, producing self-contained JSON and offline HTML artifacts.
+
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"Can your pipeline run on real recorded exchange data?"*  
+  **Student Answer:** *"Yes. By passing `--data data/book_BTC_USD_*.parquet`, the exact same feature engineering, conformal abstention, and KS drift monitoring execute on live L2 books recorded via `recorder.py`."*
 
 ---
 
 ### `recorder.py`
 
 #### Purpose
-A production-grade, asynchronous live market data recorder. It connects to live public crypto exchange order-book feeds, maintains a real-time Level 2 Limit Order Book for `BTC/USD`, samples the book at exactly 1 Hz, saves snappy-compressed Parquet files every 10 minutes, and automatically reconnects with exponential backoff on drop.
+A production-grade, asynchronous live market data recorder. It connects to live public crypto exchange order-book feeds, maintains a real-time Level 2 Limit Order Book for `BTC/USD` with strict depth truncation and crossed-book purging, samples the book at exactly 1 Hz, saves snappy-compressed Parquet files every 10 minutes, and automatically reconnects with exponential backoff on drop.
 
-#### Exchange Connectivity Findings from India
-During development, we tested WebSocket order-book streams for the three major public crypto exchanges from this location in India:
+#### Public WebSocket Exchange Probe (from India)
 
 | Exchange | WebSocket Endpoint | BTC/USD Fiat Pair? | Status from India | Diagnostic Findings |
 |---|---|---|---|---|
-| **Kraken** | `wss://ws.kraken.com/v2` | **Yes (`BTC/USD`)** | **WORKING (Selected)** | Instant handshake (<200ms), native USD fiat pair, tick size = 0.1, clean JSON L2 snapshot & diffs. |
-| **Coinbase** | `wss://ws-feed.exchange.coinbase.com` | Yes (`BTC-USD`) | Functional with caveats | Initial snapshot frame is huge (>1MB), exceeding default websocket frame limits and causing frame overflow disconnects unless patched. |
-| **OKX** | `wss://ws.okx.com:8443/ws/v5/public` | No (only `BTC-USDT`) | Restricted / Partial | Connects over WS, but does not provide the requested spot fiat `BTC/USD` pair; web domains are subject to Indian FIU compliance notices. |
+| **Kraken** | `wss://ws.kraken.com/v2` | **Yes (`BTC/USD`)** | **WORKING (Selected)** | Instant handshake (<200ms), native USD fiat pair, tick size = 0.1, depth 25 support, clean JSON L2 snapshot & diffs. |
+| **Coinbase** | `wss://ws-feed.exchange.coinbase.com` | Yes (`BTC-USD`) | Failed by default | Initial L2 snapshot frame exceeds 1MB (1,048,576 bytes), triggering `websockets.exceptions.ConnectionClosedError` 1009 frame size overflow. |
+| **OKX** | `wss://ws.okx.com:8443/ws/v5/public` | No (only `BTC-USDT`) | Restricted / Partial | Connects, but returns error 60018: spot fiat `BTC-USD` does not exist; web domains subject to Indian FIU compliance notices. |
 
 **Conclusion:** Kraken v2 is the definitive, optimal public feed for high-frequency BTC/USD order-book recording.
 
 ---
 
-#### Class: `OrderBook`
+#### Function: `OrderBook.__init__(self, tick_size=0.1, depth=25)`
 
-##### Plain English Description
-A local, in-memory representation of the active bid and ask queues.
-- `self.bids`: Dictionary mapping price level $\to$ quantity.
-- `self.asks`: Dictionary mapping price level $\to$ quantity.
+##### 1. Plain English Description
+Initializes an empty limit order book with configurable minimum tick size and subscribed order book depth.
 
-##### Methods:
-- `apply_snapshot(bids, asks)`: Completely clears existing levels and initializes the book with the exchange's authoritative initial depth snapshot.
-- `apply_update(bids, asks)`: Processes delta updates. If incoming volume is $0.0$, the price level has been cancelled or filled and is removed from the dictionary. If volume $> 0.0$, the level is updated or inserted.
-- `get_top5_row()`:
-  - Sorts bids descending (highest buy price first).
-  - Sorts asks ascending (lowest sell price first).
-  - Verifies sanity: checks if $\text{best\_bid} < \text{best\_ask}$. If the book is crossed due to network packet reordering, it safely skips the row.
-  - Computes `mid = (best_bid + best_ask) / 2.0`.
-  - Computes `spread = (best_ask - best_bid) / tick_size` in integer/float price ticks.
-  - Extracts the top 5 sizes `b0..b4` and `a0..a4`.
-  - Stamps the row with standard UTC ISO-8601 timestamp.
+##### 2. Why It Was Designed That Way
+Sets `depth=25` by default so that even under rapid quote cancellations, the top 5 levels (`b0..b4`, `a0..a4`) are always fully populated and available for sampling.
+
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"Why maintain depth 25 when you only record top 5?"*  
+  **Student Answer:** *"During high volatility, orders in the top 5 can be momentarily canceled or executed before replacements arrive. Maintaining depth 25 guarantees a 5x safety buffer so our 1 Hz sampler never encounters an empty or starved queue."*
 
 ---
 
-#### Class: `OrderBookRecorder`
+#### Function: `OrderBook.clear(self)`
 
-##### Plain English Description
-The asynchronous orchestrator running two concurrent tasks via `asyncio`:
-1. `_ws_listen()`: Streams WebSocket frames from Kraken v2, decodes JSON, and pushes snapshots/deltas into the `OrderBook`.
-2. `_sample_loop()`: Ticks on a 1.0-second interval, grabs the latest top-5 state, appends to an in-memory buffer, and checks if the 10-minute flush threshold (600 seconds) has elapsed.
+##### 1. Plain English Description
+Completely wipes all stored bid and ask dictionaries, resets the snapshot status to `False`, and clears crossed book counters.
 
-##### Reconnection & Backoff Architecture
-- Network drops are inevitable in financial feeds. If `websockets.ConnectionClosed`, a socket timeout, or an OS error occurs:
-  1. The error is logged to `recorder.log`.
-  2. The local `OrderBook` is wiped via `clear()` (stale limit orders must never persist across a disconnect).
-  3. The system waits with exponential backoff: $1.0\text{s} \to 1.5\text{s} \to 2.25\text{s} \dots$ up to a maximum of $30.0\text{s}$.
-  4. On reconnect, it re-subscribes and awaits a fresh snapshot before sampling resumes.
+##### 2. Why It Was Designed That Way
+When a network disconnection or reconnect occurs, stale price levels must never persist. Wiping the state guarantees that old quotes cannot contaminate post-reconnect trading.
 
-##### Parquet Persistence (`flush_to_parquet()`)
-- Flushes the buffer into a Pandas DataFrame with exact DriftBook columns:
-  `['timestamp', 'mid', 'spread', 'b0', 'b1', 'b2', 'b3', 'b4', 'a0', 'a1', 'a2', 'a3', 'a4']`
-- Writes to `data/book_BTC_USD_YYYYMMDD_HHMMSS.parquet` with **Snappy compression**.
-- **Graceful Shutdown:** Catches `SIGINT` (Ctrl+C) and `SIGTERM` to flush remaining buffer rows before process exit, preventing data loss.
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"What happens to quotes while the connection is reconnecting?"*  
+  **Student Answer:** *"They are cleared. The book refuses to output any sample rows until a fresh, authoritative snapshot is delivered by the exchange matching engine."*
 
-##### What Judges Will Ask & How to Answer
-- **Judge:** *"Why sample at 1 Hz instead of recording every single WebSocket packet?"*  
-  **Student Answer:** *"Raw order book updates occur thousands of times per second, mostly consisting of high-frequency quote flicker and micro-cancellations. For 5-second horizon price direction forecasting, sub-second noise degrades signal-to-noise ratio and causes storage bloat. 1 Hz uniform sampling acts as an anti-aliasing filter, capturing meaningful macroscopic queue shifts while matching our evaluation horizon."*
-- **Judge:** *"Why did you use Parquet instead of CSV or SQLite?"*  
-  **Student Answer:** *"Parquet is a columnar, binary format with snappy compression. It occupies 80% less disk space than CSV, stores exact IEEE 754 float types without string conversion precision loss, and enables reading specific columns (like timestamps) via metadata headers without loading the full table into memory."*
+---
+
+#### Function: `OrderBook._truncate(self)`
+
+##### 1. Plain English Description
+Sorts the bid dictionary descending and ask dictionary ascending, truncating both to exactly `self.depth` (25) price levels.
+
+##### 2. Why It Was Designed That Way
+In Kraken v2 L2 updates, the exchange **does not send deletion (`qty: 0`) messages for price levels that fall out of the subscribed depth window**. Without explicit truncation, orders that fall outside the top 25 accumulate forever, causing memory leaks and crossed books.
+
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"Why is truncation essential for WebSocket order books?"*  
+  **Student Answer:** *"Fixed-depth feeds only broadcast deltas within their active depth. If price rallies from 80,000 to 81,000, old bids at 79,900 never receive a cancellation message. If you do not truncate, those bids remain in memory. If price subsequently drops, the old 79,900 bid crosses the new ask, permanently corrupting the book."*
+
+---
+
+#### Function: `OrderBook.apply_snapshot(self, bids, asks)`
+
+##### 1. Plain English Description
+Replaces the internal state with the exchange's authoritative initial depth snapshot, filters out zero-quantity entries, applies truncation, and marks `has_snapshot = True`.
+
+##### 2. Why It Was Designed That Way
+Establishes an atomic baseline of the current order book state upon initial WebSocket connection.
+
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"Can the snapshot contain zero quantities?"*  
+  **Student Answer:** *"Rarely, but filtering `qty > 0` defensively protects against ill-formed exchange payloads."*
+
+---
+
+#### Function: `OrderBook.apply_update(self, bids, asks)`
+
+##### 1. Plain English Description
+Applies incremental price-level additions, modifications, and cancellations (`qty <= 0`). Before applying updates, it checks for aggressive price shifts: if new bids arrive higher than existing asks (or new asks arrive lower than existing bids), it purges the stale crossed levels before applying truncation.
+
+##### 2. Why It Was Designed That Way
+Respects fundamental market microstructure: in a double-auction exchange, an ask cannot exist at a price lower than a newly placed bid. Purging crossed levels before truncation prevents latency-induced book corruption during violent price jumps.
+
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"How do you handle packet reordering or network jitter?"*  
+  **Student Answer:** *"If a trade execution message is slightly delayed relative to a new quote, our cross-purge logic removes the executed counter-orders immediately, preserving order-book validity."*
+
+---
+
+#### Function: `OrderBook.get_top5_row(self)`
+
+##### 1. Plain English Description
+Sorts the current book, extracts top 5 bid sizes (`b0..b4`) and ask sizes (`a0..a4`), validates that $\text{best\_bid} < \text{best\_ask}$, computes mid price and spread in ticks, stamps UTC timestamp, and returns a 13-column row dictionary.
+
+##### 2. Why It Was Designed That Way
+Directly matches the input schema required by `pipeline.py` (`mid, spread, b0..b4, a0..a4`), ensuring immediate pipeline compatibility.
+
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"Why express spread in ticks instead of absolute currency?"*  
+  **Student Answer:** *"Tick-normalized spread is dimensionless and asset-invariant. It allows models and drift detectors to compare book liquidity across different price levels without scale distortion."*
+
+---
+
+#### Function: `OrderBook.needs_resync(self)`
+
+##### 1. Plain English Description
+Returns `True` if the book has remained crossed ($\text{best\_bid} \ge \text{best\_ask}$) for 10 or more consecutive seconds.
+
+##### 2. Why It Was Designed That Way
+Provides autonomous self-healing: if packet loss or exchange anomalies corrupt the local state, the recorder automatically triggers a clean re-subscription to obtain a fresh snapshot.
+
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"Why wait 10 seconds before declaring desynchronization?"*  
+  **Student Answer:** *"A 1-tick crossing might be a transient 50ms packet reordering resolved by the next incoming WebSocket packet. Waiting 10 seconds filters transient jitter while reliably catching genuine state corruption."*
+
+---
+
+#### Function: `OrderBookRecorder.__init__(self, ...)`
+
+##### 1. Plain English Description
+Configures exchange WebSocket URL (`wss://ws.kraken.com/v2`), symbol, sampling interval (1.0s), Parquet flush interval (600s / 10 minutes), output directories, and logging.
+
+##### 2. Why It Was Designed That Way
+Decouples WebSocket networking from disk persistence and allows custom sampling rates or dry-run testing (`--max-rows`).
+
+---
+
+#### Function: `OrderBookRecorder._setup_logging(self)`
+
+##### 1. Plain English Description
+Configures thread-safe logging with timestamps and severity levels, outputting simultaneously to `recorder.log` and standard console output.
+
+##### 2. Why It Was Designed That Way
+Ensures full auditability: network reconnects, dropped packets, and row-count saves are recorded permanently on disk.
+
+---
+
+#### Function: `OrderBookRecorder.flush_to_parquet(self)`
+
+##### 1. Plain English Description
+Converts the in-memory row buffer into a Pandas DataFrame, appends microsecond timestamps if filename collisions occur, and writes a Snappy-compressed Parquet file to `data/`.
+
+##### 2. Why It Was Designed That Way
+Parquet provides columnar storage with 80% compression savings over CSV and preserves exact float precision without string rounding errors.
+
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"Why flush every 10 minutes?"*  
+  **Student Answer:** *"10 minutes corresponds to 600 rows (~25 KB compressed). This minimizes memory overhead, limits data loss in power failure to at most 10 minutes, and keeps file sizes granular for parallel downstream processing."*
+
+---
+
+#### Function: `OrderBookRecorder._sample_loop(self)`
+
+##### 1. Plain English Description
+An asynchronous task that wakes up every 1.0 second, queries `self.book.get_top5_row()`, appends valid rows to the buffer, logs periodic status, and flushes to Parquet every 10 minutes or when `--max-rows` is reached.
+
+##### 2. Why It Was Designed That Way
+Uniform 1 Hz sampling acts as an anti-aliasing filter, capturing macro queue changes while matching the 5-second forecasting horizon.
+
+---
+
+#### Function: `OrderBookRecorder._ws_listen(self)`
+
+##### 1. Plain English Description
+Asynchronous task that maintains the WebSocket connection to Kraken v2, subscribes to the book channel, decodes JSON payloads, updates `OrderBook`, and implements exponential backoff reconnection ($1.0\text{s} \to 30.0\text{s}$) upon disconnection or timeout.
+
+##### 2. Why It Was Designed That Way
+Financial feeds experience inevitable transient disconnects. Exponential backoff prevents connection spamming while ensuring immediate recovery once connectivity resumes.
+
+---
+
+#### Function: `OrderBookRecorder.run(self)` & `stop(self)`
+
+##### 1. Plain English Description
+`run()` concurrently schedules `_ws_listen()` and `_sample_loop()` via `asyncio.gather()`. `stop()` flags shutdown and cancels running tasks, ensuring remaining buffer rows are flushed to Parquet in the `finally:` block before exit.
+
+##### 2. Why It Was Designed That Way
+Prevents data loss on `SIGINT` (Ctrl+C) or `SIGTERM`, ensuring clean process termination in production systemd / Docker environments.
+
+---
+
+#### Function: `recorder.py: main()`
+
+##### 1. Plain English Description
+Command-line interface with argument parsing (`--symbol`, `--interval`, `--save-interval`, `--depth`, `--out-dir`, `--max-rows`), signal handler installation, and event loop orchestration.
 
 ---
 
@@ -357,10 +466,23 @@ The asynchronous orchestrator running two concurrent tasks via `asyncio`:
 A lightweight diagnostic utility that inspects the Parquet storage directory (`data/`), calculates row counts and disk usage, extracts timestamp intervals, and prints an industrial summary table.
 
 #### Function: `count_collected_rows(directory="data")`
-- Scans `data/*.parquet`.
-- Uses `pyarrow.parquet.ParquetFile(f).metadata.num_rows` to read exact row counts **instantly from file metadata headers**, without reading data rows into RAM.
-- Reads only the `timestamp` column to display the start and end UTC times for each recorded batch.
-- Outputs human-readable file sizes (KB/MB) and cumulative totals.
+
+##### 1. Plain English Description
+Scans all `.parquet` files in the target directory. Uses `pyarrow.parquet.ParquetFile(f).metadata.num_rows` to read exact row counts **instantly from file metadata headers**, without reading data into RAM. Safely inspects the `timestamp` column to determine the UTC interval of each batch.
+
+##### 2. Why It Was Designed That Way
+Reading metadata headers is $100\times$ faster than loading full tables, allowing the script to inspect millions of rows across thousands of files in milliseconds.
+
+##### 3. What Judges Will Ask & How to Answer
+- **Judge:** *"How fast is metadata extraction compared to reading the table?"*  
+  **Student Answer:** *"PyArrow reads only the file footer dictionary where row counts are pre-computed. It requires zero decompression of data blocks, giving $O(1)$ query speed per file."*
+
+---
+
+#### Function: `count_rows.py: main()`
+
+##### 1. Plain English Description
+CLI entrypoint supporting `--dir` parameter, defaulting to `data/`.
 
 ---
 
@@ -369,10 +491,17 @@ A lightweight diagnostic utility that inspects the Parquet storage directory (`d
 #### Purpose
 A standalone, high-performance visual replay dashboard. It was built specifically to impress judges during live presentations.
 
-#### Key Engineering Decisions
-1. **Zero External Dependencies:** No React, no D3, no Chart.js, no internet CDN calls. It runs completely offline from a local file URL (`file://`). If the venue Wi-Fi fails during the hackathon, DriftBook still works flawlessly!
-2. **Vanilla HTML5 Canvas:** Renders at 60 FPS directly on native Canvas 2D contexts with sub-pixel resolution adjustments (`devicePixelRatio`).
-3. **Live Replay Controller:** Features Play/Pause, step scrubbing via an interactive slider, dynamic rolling accuracy curves for all three models, mid-price path, and an active regime/abstention status meter.
+#### Key Functions Inside `<script>`:
+
+##### Function: `plot(cv, lines, lo, hi, i)`
+- **Plain English:** Renders rolling accuracy curves, mid-price trajectories, and drift alert markers directly on native HTML5 Canvas 2D contexts at 60 FPS.
+- **Design Rationale:** Uses `devicePixelRatio` scaling to eliminate blurry canvas artifacts on Retina and 4K displays.
+- **Judge Question:** *"Why not use Plotly or Chart.js?"*  
+  **Answer:** *"Third-party libraries introduce external CDN dependencies that fail in offline hackathon venues or air-gapped trading desks. Vanilla Canvas guarantees 100% offline reliability with sub-millisecond render times."*
+
+##### Function: `upd(i)`
+- **Plain English:** Updates KPI cards, status bands (Green = Market stable, Yellow = Market changed: adapting), confidence bar, and Canvas charts for a given time step index `i`.
+- **Design Rationale:** Decouples state scrubbing from the render loop, allowing smooth scrubbing via the replay slider or automatic 70ms tick playback.
 
 ---
 

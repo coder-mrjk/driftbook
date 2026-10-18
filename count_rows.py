@@ -47,11 +47,13 @@ def count_collected_rows(directory: str = "data") -> int:
 
             time_range = ""
             if num_rows > 0:
-                # Read only timestamp column to determine exact interval
-                df_ts = pd.read_parquet(f, columns=["timestamp"])
-                t_start = df_ts["timestamp"].iloc[0][:19].replace("T", " ")
-                t_end = df_ts["timestamp"].iloc[-1][:19].replace("T", " ")
-                time_range = f"{t_start} -> {t_end}"
+                try:
+                    df_ts = pd.read_parquet(f, columns=["timestamp"])
+                    t_start = str(df_ts["timestamp"].iloc[0])[:19].replace("T", " ")
+                    t_end = str(df_ts["timestamp"].iloc[-1])[:19].replace("T", " ")
+                    time_range = f"{t_start} -> {t_end}"
+                except Exception:
+                    time_range = "N/A (no timestamp)"
 
             print(f"{f.name:<38} | {num_rows:>8d} | {size_str:>9} | {time_range}")
         except Exception as e:

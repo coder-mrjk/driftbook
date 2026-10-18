@@ -58,6 +58,61 @@ def test_order_book_crossed_safety():
     assert book.get_top5_row() is None
 
 
+def test_order_book_depth_truncation():
+    book = OrderBook(tick_size=0.1, depth=10)
+    bids = [{"price": 100.0 - i * 0.1, "qty": 1.0} for i in range(25)]
+    asks = [{"price": 100.1 + i * 0.1, "qty": 1.0} for i in range(25)]
+    book.apply_snapshot(bids, asks)
+
+    # OrderBook must strictly truncate to depth 10
+    assert len(book.bids) == 10
+    assert len(book.asks) == 10
+    assert min(book.bids.keys()) >= 99.1 - 1e-6
+    assert max(book.asks.keys()) <= 101.0 + 1e-6
+
+
+def test_order_book_price_rally_and_drop_resilience():
+    book = OrderBook(tick_size=0.1, depth=10)
+    # Initial snapshot at 100
+    book.apply_snapshot(
+        bids=[{"price": 100.0 - i * 0.1, "qty": 1.0} for i in range(10)],
+        asks=[{"price": 100.1 + i * 0.1, "qty": 1.0} for i in range(10)],
+    )
+    row1 = book.get_top5_row()
+    assert row1 is not None
+    assert abs(row1["mid"] - 100.05) < 1e-6
+
+    # Market rallies to 110: new bids at 110, new asks at 110.1
+    book.apply_update(
+        bids=[{"price": 110.0 - i * 0.1, "qty": 1.0} for i in range(10)],
+        asks=[{"price": 110.1 + i * 0.1, "qty": 1.0} for i in range(10)],
+    )
+    row2 = book.get_top5_row()
+    assert row2 is not None, "Book should not be permanently crossed after price rally"
+    assert abs(row2["mid"] - 110.05) < 1e-6
+
+    # Market drops to 95: new bids at 95, new asks at 95.1
+    book.apply_update(
+        bids=[{"price": 95.0 - i * 0.1, "qty": 1.0} for i in range(10)],
+        asks=[{"price": 95.1 + i * 0.1, "qty": 1.0} for i in range(10)],
+    )
+    row3 = book.get_top5_row()
+    assert row3 is not None, "Book should not be permanently crossed after price drop"
+    assert abs(row3["mid"] - 95.05) < 1e-6
+
+
+def test_order_book_needs_resync():
+    book = OrderBook(tick_size=0.1, depth=10)
+    book.has_snapshot = True
+    book.bids = {105.0: 1.0, 104.9: 1.0, 104.8: 1.0, 104.7: 1.0, 104.6: 1.0}
+    book.asks = {100.0: 1.0, 100.1: 1.0, 100.2: 1.0, 100.3: 1.0, 100.4: 1.0}
+
+    assert not book.needs_resync()
+    for _ in range(10):
+        book.get_top5_row()
+    assert book.needs_resync()
+
+
 def test_recorder_flush_to_parquet():
     temp_dir = tempfile.mkdtemp()
     log_file = os.path.join(temp_dir, "test.log")

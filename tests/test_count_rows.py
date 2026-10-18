@@ -35,6 +35,10 @@ def test_count_rows_empty_and_populated():
         })
         df2.to_parquet(Path(temp_dir) / "f2.parquet", compression="snappy")
 
-        assert count_collected_rows(temp_dir) == 5
+        # 4. File without timestamp column
+        df3 = pd.DataFrame({"mid": [102.0, 102.1]})
+        df3.to_parquet(Path(temp_dir) / "f3.parquet", compression="snappy")
+
+        assert count_collected_rows(temp_dir) == 7
     finally:
         shutil.rmtree(temp_dir)

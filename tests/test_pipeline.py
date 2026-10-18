@@ -23,10 +23,10 @@ def test_features_computation():
 
 
 def test_pipeline_run_modes():
-    # Fast test with small T
-    d = simulate(T=3500, shifts=(1500, 2500), seed=2)
+    # Fast test with small T, shifts located after initial training TR=3000
+    d = simulate(T=4500, shifts=(3400, 3900), seed=2)
     X, y = features(d)
-    shifts = [1500, 2500]
+    shifts = [3400, 3900]
 
     # Run static mode
     out_static, ends = run('static', X, y, shifts)

@@ -1,9 +1,9 @@
 # DriftBook Project State & Milestone Log
 
-**Document Version:** 1.0.0  
+**Document Version:** 1.1.0  
 **Date:** 2026-10-18  
 **Status:** Approved & Verified  
-**Current Phase:** Milestone 1 & 2 Complete (Order-Book Modeling, Evaluation Pipeline, Live Exchange Recorder, Diagnostics, Presentation Guide)
+**Current Phase:** Milestone 1 & 2 Complete (Hardened OrderBook with Depth Truncation, Cross-Purge, Evaluation Pipeline, Diagnostics, 10 Unit Tests, Presentation Guide)
 
 ---
 
@@ -17,12 +17,12 @@ DriftBook is a quantitative market microstructure forecasting framework built fo
 | Component | File Path | Status | Verification Evidence |
 |---|---|---|---|
 | Synthetic LOB Simulator | `simulate.py` | Complete & Tested | Planted regime shifts at steps 6000 and 11000; verified with `tests/test_simulate.py`. |
-| Core Forecasting Pipeline | `pipeline.py` | Complete & Tested | Walk-forward evaluation of Static, Periodic, and DriftBook models. Generates `results.json` and compiles `dashboard.html`. Tested via `tests/test_pipeline.py`. |
-| Live Exchange Recorder | `recorder.py` | Complete & Tested | Evaluated Kraken, Coinbase, and OKX from India; selected Kraken v2 WS for BTC/USD top 5 depth. Records 1 Hz, saves compressed Snappy Parquet every 10 min, automatic reconnect. Tested via `tests/test_recorder.py` and live 10-row recording test. |
-| Row Inspection Utility | `count_rows.py` | Complete & Tested | Fast header-based row counting across Parquet files. Tested via `tests/test_count_rows.py`. |
+| Core Forecasting Pipeline | `pipeline.py` | Complete & Tested | Walk-forward evaluation of Static, Periodic, and DriftBook models. Dynamic fallback on `(ImportError, OSError)` for LightGBM, dataset size validation on `--data`. Tested via `tests/test_pipeline.py`. |
+| Live Exchange Recorder | `recorder.py` | Complete & Tested | Evaluated Kraken, Coinbase, and OKX from India; selected Kraken v2 WS for BTC/USD depth 25. Hardened with depth truncation, aggressive cross-purge, and self-healing resync. Tested via `tests/test_recorder.py` and live 10-row recording test. |
+| Row Inspection Utility | `count_rows.py` | Complete & Tested | Fast header-based row counting across Parquet files with safe metadata and timestamp extraction. Tested via `tests/test_count_rows.py`. |
 | Replay Dashboard | `dashboard.html` / `dashboard_template.html` | Complete & Tested | Zero-CDN, vanilla HTML5 Canvas interactive scrubber with rolling accuracy, mid-price, and confidence/abstain meters. Verified syntax and rendering. |
 | Presentation & Defense Guide | `docs/explanation.md` | Complete & Reviewed | File-by-file, function-by-function breakdown, plain English explanations, design rationales, and judge defense cheat sheet. |
-| Automated Test Suite | `tests/` + `pytest.ini` | Complete & Passing | 7 unit tests passing across all components with 100% success rate. |
+| Automated Test Suite | `tests/` + `pytest.ini` | Complete & Passing | 10 unit tests passing across all components with 0 warnings. |
 
 ---
 

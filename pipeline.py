@@ -6,7 +6,7 @@ from scipy.stats import ks_2samp
 from sklearn.metrics import f1_score, matthews_corrcoef
 try:
     from lightgbm import LGBMClassifier as GBM; KW = dict(n_estimators=150, learning_rate=.05, num_leaves=15, verbose=-1)
-except ImportError:
+except (ImportError, OSError):
     from sklearn.ensemble import HistGradientBoostingClassifier as GBM; KW = dict(max_iter=150, learning_rate=.05)
 from simulate import simulate
 H, C, TR = 5, 100, 3000          # label horizon, chunk size, initial training rows
@@ -66,7 +66,12 @@ def run(mode, X, y, shifts):
     return out, ends
 
 if __name__ == '__main__':
-    d = pd.read_parquet(sys.argv[sys.argv.index('--data')+1]) if '--data' in sys.argv else simulate()
+    if '--data' in sys.argv:
+        d = pd.read_parquet(sys.argv[sys.argv.index('--data')+1])
+        if len(d) < TR + C + H:
+            sys.exit(f"Error: Dataset has {len(d)} rows. Walk-forward evaluation requires at least {TR + C + H} rows (TR={TR}, C={C}, H={H}). Collect more data using recorder.py.")
+    else:
+        d = simulate()
     X, y = features(d)
     sh = [int(i) for i in np.where(np.diff(d.regime.values) != 0)[0] + 1] if 'regime' in d else []
     models = {}
