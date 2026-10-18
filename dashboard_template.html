@@ -1,0 +1,42 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DriftBook</title>
+<style>
+:root{--bg:#0a0f1e;--panel:#111a30;--line:#22304f;--tx:#e8edf7;--mut:#8d9ab6;--ok:#2dd4bf;--warn:#fbbf24;--st:#8d9ab6;--pe:#7aa2ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 "Segoe UI",system-ui,sans-serif;padding:20px;max-width:1180px;margin:auto}
+h1{font-size:22px;margin:0}.sub{color:var(--mut);margin:2px 0 16px}
+.band{border-radius:18px;padding:22px 26px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;transition:background .4s,border-color .4s;border:1px solid}
+.band.ok{background:#0f2a2f;border-color:#1c5b57}.band.warn{background:#33270c;border-color:#7a5a12}
+.band b{font-size:30px;letter-spacing:-.5px}.band small{color:var(--mut);display:block}
+.meter{min-width:260px}.bar{height:10px;border-radius:9px;background:#ffffff14;overflow:hidden;margin:6px 0}.bar i{display:block;height:100%;width:0;background:var(--ok);transition:width .3s}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(3,1fr);margin:14px 0}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+.big{font-size:30px;font-weight:600}.row{display:flex;gap:12px;color:var(--mut);font-size:13px;margin:4px 0}small{color:var(--mut)}
+canvas{width:100%;height:230px;display:block}.ctl{display:flex;gap:12px;align-items:center;margin:14px 0}input[type=range]{flex:1;accent-color:var(--ok)}
+button{background:var(--ok);color:#04201c;border:0;border-radius:10px;padding:9px 18px;font:600 14px inherit;cursor:pointer}button:focus-visible,input:focus-visible{outline:3px solid #fff}
+.leg span{margin-right:16px;font-size:13px}.leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}.band b{font-size:24px}}
+</style></head><body>
+<h1>DriftBook</h1><p class="sub">Order-book direction forecasting that notices when the market changes, adapts, and abstains when unsure. Replay of simulated data with planted regime shifts.</p>
+<div class="band ok" id="band"><div><b id="st">Market stable</b><small id="t"></small></div><div class="meter"><small>Prediction confidence</small><div class="bar"><i id="conf"></i></div><span id="confv"></span></div></div>
+<div class="ctl"><button id="play">Play</button><input id="sl" type="range" min="0" value="0" aria-label="Replay position"></div>
+<div class="grid" id="kpis"></div>
+<div class="panel"><b>Rolling accuracy (last 500 steps)</b><div class="leg"><span><i style="background:#8d9ab6"></i>Static</span><span><i style="background:#7aa2ff"></i>Periodic retrain</span><span><i style="background:#2dd4bf"></i>DriftBook</span><span><i style="background:#fbbf24"></i>Drift alert</span></div><canvas id="c1"></canvas><small>Shaded blocks are the true market regimes (known only because the data is simulated).</small></div>
+<div class="grid"><div class="panel" style="grid-column:span 2"><b>Mid price</b><canvas id="c2"></canvas></div><div class="panel"><b>DriftBook results</b><div id="sum"></div></div></div>
+<script>
+const D=__DATA__,M=D.models,K=Object.keys(M),N=D.ends.length,$=s=>document.querySelector(s);
+const C={static:'#8d9ab6',periodic:'#7aa2ff',driftbook:'#2dd4bf'},NM={static:'Static',periodic:'Periodic retrain',driftbook:'DriftBook'},db=M.driftbook,f=v=>v==null?'not recovered':v;
+$('#kpis').innerHTML=K.map(k=>`<div class="panel" style="border-top:3px solid ${C[k]}"><b>${NM[k]}</b><div class="big" id="r_${k}"></div><small>rolling accuracy now</small><div class="row"><span>Acc ${(M[k].acc*100).toFixed(1)}%</span><span>F1 ${M[k].f1.toFixed(2)}</span><span>MCC ${M[k].mcc.toFixed(2)}</span></div><small>${M[k].lat_ms.toFixed(3)} ms per prediction</small></div>`).join('');
+$('#sum').innerHTML=`<div class="row"><span>Detection delay: ${db.delay.map(f).join(', ')} steps</span></div><div class="row"><span>False alarms: ${db.false_alarms}</span></div><div class="row"><span>Abstain rate: ${(db.abstain_rate*100).toFixed(1)}%</span></div><div class="row"><span>Accuracy when it answers: ${(db.selective_acc*100).toFixed(1)}%</span></div><div class="row"><span>Conformal coverage: ${(db.coverage*100).toFixed(1)}%</span></div><div class="row"><span>Recovery after shifts: ${db.rec.map(f).join(', ')} steps</span></div>`;
+function plot(cv,lines,lo,hi,i){const r=devicePixelRatio,w=cv.width=cv.clientWidth*r,h=cv.height=cv.clientHeight*r,g=cv.getContext('2d'),X=v=>v/D.n*w,Y=v=>h-(v-lo)/(hi-lo)*h*.88-h*.06,b=[0,...D.shifts,D.n],t=D.ends[i];
+ for(let j=0;j<b.length-1;j++){g.fillStyle=['#ffffff08','#fbbf2412','#7aa2ff12'][j%3];g.fillRect(X(b[j]),0,X(b[j+1])-X(b[j]),h)}
+ g.setLineDash([5*r,5*r]);g.strokeStyle='#fbbf24';g.lineWidth=r;D.drift.filter(d=>d<=t).forEach(d=>{g.beginPath();g.moveTo(X(d),0);g.lineTo(X(d),h);g.stroke()});g.setLineDash([]);
+ lines.forEach(([ys,xs,c])=>{g.strokeStyle=c;g.lineWidth=2*r;g.beginPath();let s=0;for(let j=0;j<ys.length&&xs[j]<=t;j++){s?g.lineTo(X(xs[j]),Y(ys[j])):g.moveTo(X(xs[j]),Y(ys[j]));s=1}g.stroke()});
+ g.fillStyle='#fff';g.fillRect(X(t),0,r,h)}
+function upd(i){const t=D.ends[i];plot($('#c1'),K.map(k=>[M[k].curve,D.ends,C[k]]),.2,1,i);
+ plot($('#c2'),[[D.mid,D.mid.map((_,j)=>j*50),'#e8edf7']],Math.min(...D.mid),Math.max(...D.mid),i);
+ K.forEach(k=>$('#r_'+k).textContent=(M[k].curve[i]*100).toFixed(1)+'%');
+ const dr=D.drift.filter(d=>d<=t),ad=dr.length&&!D.refit.some(r=>r>dr[dr.length-1]&&r<=t);
+ $('#band').className='band '+(ad?'warn':'ok');$('#st').textContent=ad?'Market changed: adapting':'Market stable';$('#t').textContent='Step '+t+' of '+D.n;
+ const cf=1-D.abst[i];$('#conf').style.width=cf*100+'%';$('#conf').style.background=cf>.5?'var(--ok)':'var(--warn)';$('#confv').textContent=cf>.5?'Predicting ('+(cf*100).toFixed(0)+'% of calls answered)':'Low confidence: abstaining ('+(cf*100).toFixed(0)+'% answered)'}
+const sl=$('#sl');sl.max=N-1;sl.oninput=()=>upd(+sl.value);let tm=null;
+$('#play').onclick=function(){if(tm){clearInterval(tm);tm=null;this.textContent='Play';return}this.textContent='Pause';tm=setInterval(()=>{if(+sl.value>=N-1){clearInterval(tm);tm=null;$('#play').textContent='Play';return}sl.value=+sl.value+1;upd(+sl.value)},70)};
+sl.value=N-1;upd(N-1);addEventListener('resize',()=>upd(+sl.value));
+</script></body></html>
