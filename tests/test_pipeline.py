@@ -103,3 +103,36 @@ def test_pipeline_no_regime_reporting():
     # Must NOT report false_alarms or delay
     assert 'false_alarms' not in out_db
     assert 'delay' not in out_db
+
+
+def test_adwin_detector():
+    d = simulate(T=4500, shifts=(3400, 3900), seed=4)
+    X, y = features(d, verbose=False)
+    shifts = [3400, 3900]
+    out_adwin, _ = run('adwin', X, y, shifts)
+    assert 'acc' in out_adwin
+    assert 'f1' in out_adwin
+    assert 'abstain_rate' in out_adwin
+    assert 'drift' in out_adwin
+    assert isinstance(out_adwin['drift'], list)
+
+
+def test_regime_router():
+    d = simulate(T=4500, shifts=(3400, 3900), seed=5)
+    X, y = features(d, verbose=False)
+    shifts = [3400, 3900]
+    out_router, _ = run('router', X, y, shifts)
+    assert 'acc' in out_router
+    assert 'f1' in out_router
+    assert 'abstain_rate' in out_router
+    assert 0.0 <= out_router['abstain_rate'] <= 1.0
+
+
+def test_heldout_split_evaluation():
+    d = simulate(T=5000, shifts=(3200, 4200), seed=6)
+    X, y = features(d, verbose=False)
+    split_60 = int(0.6 * len(d))
+    out_heldout, _ = run('driftbook', X, y, [3200, 4200], eval_range=(split_60, len(d)))
+    assert 'acc' in out_heldout
+    assert 'f1' in out_heldout
+
