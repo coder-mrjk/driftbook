@@ -1,16 +1,16 @@
 # Final Production Handover — DriftBook
 
 **Title:** DriftBook: Production Handover & Operations Runbook  
-**Version:** 1.0.0  
-**Date:** 2026-10-18  
+**Version:** 1.1.0  
+**Date:** 2026-10-19  
 **Owner:** DriftBook Engineering Team  
 **Status:** Approved & Production Verified  
-**Verified against commit:** Working Tree Clean  
+**Verified against commit:** b6de5b1 / 6d00117  
 
 ---
 
 ## 1. System Overview
-DriftBook is a quantitative order-book forecasting and drift-detection framework designed for high-frequency trading (HFT) and market making. It forecasts short-term price direction (5-second horizon) from Level-2 order book depth, monitors rolling multi-feature Kolmogorov-Smirnov statistics to detect market regime shifts, and deploys adaptive conformal prediction sets to abstain from trading during periods of high uncertainty or adverse selection.
+DriftBook is a quantitative order-book forecasting and drift-detection framework designed for high-frequency trading (HFT) and market making. It forecasts short-term price direction (5-step horizon) from Level-2 order book depth, monitors rolling multi-feature Kolmogorov-Smirnov statistics and River ADWIN streaming errors to detect market regime shifts, deploys adaptive conformal prediction sets to abstain from trading during periods of high uncertainty or adverse selection, and routes between specialized prediction heads with a dynamic regime router.
 
 ---
 
@@ -19,11 +19,12 @@ DriftBook is a quantitative order-book forecasting and drift-detection framework
 | File | Purpose | Key Interface |
 |---|---|---|
 | [`simulate.py`](file:///Users/karthi/driftbook/simulate.py) | Synthetic order-book generator with planted regime shifts ($\beta$ flips sign, spread widens, volatility increases). | `simulate(T=18000, shifts=(6000, 11000), seed=7)` |
-| [`pipeline.py`](file:///Users/karthi/driftbook/pipeline.py) | Feature engineering, walk-forward evaluation of Static, Periodic, and DriftBook models, adaptive conformal abstention, and metrics reporting. | `features(d)`, `run(mode, X, y, shifts)` |
+| [`pipeline.py`](file:///Users/karthi/driftbook/pipeline.py) | Feature engineering, walk-forward evaluation of Static, Periodic, Tuned DriftBook, ADWIN, and Regime Router models. | `features(d)`, `run(...)` |
 | [`recorder.py`](file:///Users/karthi/driftbook/recorder.py) | Live Kraken v2 WebSocket L2 book recorder for BTC/USD at 1 Hz with depth truncation, cross-purging, and 10-minute Snappy Parquet flushes. | `OrderBook`, `OrderBookRecorder`, `main()` |
 | [`count_rows.py`](file:///Users/karthi/driftbook/count_rows.py) | Diagnostic utility reading Parquet metadata headers to inspect row counts, disk size, and UTC time spans. | `count_collected_rows(directory="data")` |
-| [`dashboard_template.html`](file:///Users/karthi/driftbook/dashboard_template.html) | High-performance HTML5 Canvas replay dashboard (100% offline, zero external CDN dependencies). | `plot()`, `upd()` |
+| [`dashboard_template.html`](file:///Users/karthi/driftbook/dashboard_template.html) | High-performance HTML5 Canvas replay dashboard (100% offline, zero external CDN dependencies) supporting all 5 models. | `plot()`, `upd()` |
 | [`dashboard.html`](file:///Users/karthi/driftbook/dashboard.html) | Standalone dashboard populated with benchmark dataset and model predictions. | Open in browser (`open dashboard.html`) |
+| [`TUNING_AND_EVALUATION_REPORT.md`](file:///Users/karthi/driftbook/TUNING_AND_EVALUATION_REPORT.md) | Exhaustive tuning grid search on 60% split and out-of-sample held-out 40% benchmarks. | Empirical Evaluation Report |
 | [`docs/explanation.md`](file:///Users/karthi/driftbook/docs/explanation.md) | Comprehensive presentation guide for judges (IIT Bombay & Optiver): 60s pitch, function breakdown, design rationales, and Q&A grill defense. | Technical Documentation |
 | [`docs/STATE.md`](file:///Users/karthi/driftbook/docs/STATE.md) | Milestone tracking log and benchmark performance records. | Project State Tracking |
 
@@ -39,11 +40,15 @@ pip install -r requirements.txt
 
 ### 3.2 Running the Pipeline (Synthetic Benchmark)
 ```bash
+# Run full walk-forward evaluation (all 5 models)
 python pipeline.py
+
+# Run strictly on held-out final 40% split
+python pipeline.py --heldout
+
+# Run on real recorded Kraken BTC/USD data
+python pipeline.py --data combined.parquet
 ```
-Output:
-- Generates `results.json` containing accuracy, F1, MCC, recovery delay, detection timestamps, and conformal metrics.
-- Updates `dashboard.html` for instant visual replay.
 
 ### 3.3 Opening the Replay Dashboard
 ```bash
@@ -52,16 +57,12 @@ open dashboard.html
 Features:
 - **Play/Pause Replay:** 70ms tick automatic playback.
 - **Interactive Scrubber:** Scrub directly to Regime 1 (step 6000) or Regime 2 (step 11000) to observe real-time drift detection and conformal abstention.
-- **Status Band:** Visual color alerts (Green = Market stable, Yellow = Market changed: adapting).
+- **5-Model Accuracy Comparison:** Live Canvas plots for Static, Periodic, DriftBook (KS), ADWIN, and Regime Router.
 - **Abstain Meter:** Dynamic confidence bar displaying answer rate vs. abstention rate.
 
 ### 3.4 Live Exchange Order Book Recording
 ```bash
-# Record live BTC/USD from Kraken v2 WebSocket (1 row/sec, saves to data/ every 10 min)
 python recorder.py
-
-# Optional: Run quick dry-run test collecting 10 rows
-python recorder.py --max-rows 10
 ```
 
 ### 3.5 Checking Recorded Row Counts
@@ -71,23 +72,23 @@ python count_rows.py
 
 ### 3.6 Executing Unit Tests
 ```bash
-pytest -v
+pytest tests/ -v
 ```
 
 ---
 
-## 4. Key Quantitative Results
+## 4. Key Quantitative Results (Held-Out 40% Split: Steps 10,800–18,000)
 
-| Metric | Static Model | Periodic Retrain | DriftBook (Ours) |
-|---|---|---|---|
-| **Overall Accuracy** | 39.6% | 43.2% | **45.8%** |
-| **Selective Accuracy** (when trading) | 39.6% | 43.2% | **55.8% (+16.2% edge)** |
-| **Macro F1 Score** | 0.396 | 0.435 | **0.458** |
-| **Matthews Correlation (MCC)** | 0.095 | 0.148 | **0.188 (+98% vs static)** |
-| **Abstain Rate** | 0.0% | 0.0% | **77.3%** |
-| **Conformal Coverage** | N/A | N/A | **80.1% (target: 80.0%)** |
-| **Inference Latency** | 0.008 ms | 0.008 ms | **0.010 ms (~10 $\mu$s)** |
-| **Shock Recovery Speed** | 5,499 steps | 3,399 steps | **1,299 steps (76% faster)** |
+| Metric | Static Model | Periodic (2k) | DriftBook (KS) | ADWIN (River) | Regime Router (Ours) |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Overall Accuracy** | 48.5% | 45.2% | 44.5% | 44.9% | **49.0%** |
+| **Selective Accuracy** (when trading) | 48.5% | 45.2% | 48.9% | 48.6% | **51.4% (+2.9% edge)** |
+| **Macro F1 Score** | 0.486 | 0.446 | 0.446 | 0.446 | **0.492** |
+| **Matthews Correlation (MCC)** | 0.230 | 0.177 | 0.167 | 0.171 | **0.238** |
+| **Abstain Rate** | 0.0% | 0.0% | 50.4% | 51.0% | **40.1%** |
+| **Detection Delay** | N/A | N/A | 400 steps | **82 steps** | **0 steps (Instant)** |
+| **False Alarms** | N/A | N/A | **0** | 2 | **0** |
+| **Inference Latency** | 0.009 ms | 0.008 ms | 0.010 ms | 0.010 ms | 0.017 ms |
 
 ---
 
@@ -96,3 +97,5 @@ pytest -v
 - [x] Clean Git State: Master branch clean with descriptive Conventional Commits.
 - [x] No Look-ahead Bias: Prediction horizon strictly masked ($hi - H$), ensuring models never train on unmaterialized future returns.
 - [x] Zero External CDN Dependencies: `dashboard.html` executes completely offline without external network calls.
+- [x] Full Test Coverage: 17 unit tests passing with zero errors or warnings.
+
