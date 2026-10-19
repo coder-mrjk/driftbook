@@ -26,7 +26,7 @@ DriftBook solves this problem through three layers of defense:
 ### 1. Environment Setup
 ```bash
 # Clone and enter directory
-cd /Users/karthi/driftbook
+cd driftbook
 
 # Activate the virtual environment
 source .venv/bin/activate

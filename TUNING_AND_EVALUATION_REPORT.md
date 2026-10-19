@@ -2,9 +2,8 @@
 
 **Document Version:** 1.0.0  
 **Date:** 2026-10-19  
-**Owner:** DriftBook Quantitative Research Team  
-**Status:** Approved & Verified  
-**Verified against commit:** b6de5b1  
+**Owner:** DriftBook Authors  
+**Status:** Research prototype validated on simulated data  
 
 ---
 
@@ -50,7 +49,7 @@ The held-out test split simulates 7,200 steps out-of-sample with a genuine regim
 | **Baseline DriftBook** (`ks=0.30, hits=2, α=0.20, refit=800`) | 0.443 | 0.439 | 0.162 | 80.3% | 0.502 | `[11300, 15000]` | 300 steps | 1 (step 15,000) |
 | **Tuned KS DriftBook** (`ks=0.35, hits=3, α=0.35, refit=600`) | 0.445 | 0.446 | 0.167 | **50.4%** | 0.489 | `[11400]` | 400 steps | **0** |
 | **ADWIN Detector** (`river.drift.ADWIN(delta=0.002)`) | 0.449 | 0.446 | 0.171 | 51.0% | 0.486 | `[11082, 15278, 17622]` | **82 steps** | 2 |
-| **Regime Router** (2 Specialized Heads + Volatility Router) | **0.490** | **0.492** | **0.238** | **40.1%** | **0.514** | *Instantaneous* | **0 steps** | **0** |
+| **Regime Router (Experimental)** (2 Heads + Volatility Router) | **0.490** | **0.492** | **0.238** | **40.1%** | **0.514** | *Instantaneous* | **0 steps** | **0** |
 
 ---
 

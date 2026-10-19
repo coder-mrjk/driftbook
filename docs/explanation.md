@@ -2,8 +2,8 @@
 
 > **Prepared for:** Student Presentation to Judges (IIT Bombay & Optiver AI Innovation Lab — Perceptron Hackathon, Theme 3: Markets & Trading Intelligence)  
 > **Topic:** Order Book Direction Forecasting Under Regime Shifts with Adaptive Conformal Abstention  
-> **Author/Maintainer:** DriftBook Engineering Team  
-> **Status:** Production Verified against Working Codebase
+> **Author/Maintainer:** DriftBook Authors  
+> **Status:** Research prototype validated on simulated data  
 
 ---
 

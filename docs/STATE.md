@@ -2,8 +2,8 @@
 
 **Document Version:** 1.2.0  
 **Date:** 2026-10-19  
-**Status:** Approved & Verified  
-**Current Phase:** Milestone 3 Complete (Hyperparameter Tuning on 60% Split, River ADWIN Streaming Detector, 2-Head Regime Router, Held-Out 40% Evaluation, 17 Unit Tests, Tuning & Evaluation Report)
+**Status:** Research prototype validated on simulated data  
+**Current Phase:** Milestone 3 Complete (Hyperparameter Tuning on 60% Split, River ADWIN Streaming Detector, Regime Router (Experimental), Held-Out 40% Evaluation, 17 Unit Tests, Tuning & Evaluation Report)
 
 ---
 
@@ -62,7 +62,7 @@ DriftBook is a quantitative market microstructure forecasting framework built fo
   - Detection Delay: **82 steps** (fastest detector)
   - False Alarms: 2
   - Per-sample Inference Latency: 0.010 ms
-- **Regime Router (2 Heads + Volatility Router):**
+- **Regime Router (Experimental - Learned from TR Training Rows):**
   - **Accuracy: 49.0%** | **F1 Macro: 0.492** | **MCC: 0.238** (Best Overall)
   - **Selective Accuracy: 51.4%**
   - **Abstain Rate: 40.1%** (Lowest Abstain Rate)

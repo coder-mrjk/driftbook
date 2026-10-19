@@ -1,16 +1,14 @@
-# Final Production Handover — DriftBook
+# Project Handover & Architecture Guide — DriftBook
 
-**Title:** DriftBook: Production Handover & Operations Runbook  
-**Version:** 1.1.0  
+**Title:** DriftBook: Handover & Operations Guide  
+**Version:** 1.2.0  
 **Date:** 2026-10-19  
-**Owner:** DriftBook Engineering Team  
-**Status:** Approved & Production Verified  
-**Verified against commit:** b6de5b1 / 6d00117  
+**Status:** Research prototype validated on simulated data  
 
 ---
 
 ## 1. System Overview
-DriftBook is a quantitative order-book forecasting and drift-detection framework designed for high-frequency trading (HFT) and market making. It forecasts short-term price direction (5-step horizon) from Level-2 order book depth, monitors rolling multi-feature Kolmogorov-Smirnov statistics and River ADWIN streaming errors to detect market regime shifts, deploys adaptive conformal prediction sets to abstain from trading during periods of high uncertainty or adverse selection, and routes between specialized prediction heads with a dynamic regime router.
+DriftBook is a quantitative order-book forecasting and drift-detection framework (research prototype validated on simulated data). It forecasts short-term price direction (5-step horizon) from Level-2 order book depth, monitors rolling multi-feature Kolmogorov-Smirnov statistics and River ADWIN streaming errors to detect market regime shifts, deploys adaptive conformal prediction sets to abstain from trading during periods of high uncertainty or adverse selection, and routes between specialized prediction heads with an experimental dynamic regime router.
 
 ---
 
@@ -18,15 +16,15 @@ DriftBook is a quantitative order-book forecasting and drift-detection framework
 
 | File | Purpose | Key Interface |
 |---|---|---|
-| [`simulate.py`](file:///Users/karthi/driftbook/simulate.py) | Synthetic order-book generator with planted regime shifts ($\beta$ flips sign, spread widens, volatility increases). | `simulate(T=18000, shifts=(6000, 11000), seed=7)` |
-| [`pipeline.py`](file:///Users/karthi/driftbook/pipeline.py) | Feature engineering, walk-forward evaluation of Static, Periodic, Tuned DriftBook, ADWIN, and Regime Router models. | `features(d)`, `run(...)` |
-| [`recorder.py`](file:///Users/karthi/driftbook/recorder.py) | Live Kraken v2 WebSocket L2 book recorder for BTC/USD at 1 Hz with depth truncation, cross-purging, and 10-minute Snappy Parquet flushes. | `OrderBook`, `OrderBookRecorder`, `main()` |
-| [`count_rows.py`](file:///Users/karthi/driftbook/count_rows.py) | Diagnostic utility reading Parquet metadata headers to inspect row counts, disk size, and UTC time spans. | `count_collected_rows(directory="data")` |
-| [`dashboard_template.html`](file:///Users/karthi/driftbook/dashboard_template.html) | High-performance HTML5 Canvas replay dashboard (100% offline, zero external CDN dependencies) supporting all 5 models. | `plot()`, `upd()` |
-| [`dashboard.html`](file:///Users/karthi/driftbook/dashboard.html) | Standalone dashboard populated with benchmark dataset and model predictions. | Open in browser (`open dashboard.html`) |
-| [`TUNING_AND_EVALUATION_REPORT.md`](file:///Users/karthi/driftbook/TUNING_AND_EVALUATION_REPORT.md) | Exhaustive tuning grid search on 60% split and out-of-sample held-out 40% benchmarks. | Empirical Evaluation Report |
-| [`docs/explanation.md`](file:///Users/karthi/driftbook/docs/explanation.md) | Comprehensive presentation guide for judges (IIT Bombay & Optiver): 60s pitch, function breakdown, design rationales, and Q&A grill defense. | Technical Documentation |
-| [`docs/STATE.md`](file:///Users/karthi/driftbook/docs/STATE.md) | Milestone tracking log and benchmark performance records. | Project State Tracking |
+| [`simulate.py`](../simulate.py) | Synthetic order-book generator with planted regime shifts ($\beta$ flips sign, spread widens, volatility increases). | `simulate(T=18000, shifts=(6000, 11000), seed=7)` |
+| [`pipeline.py`](../pipeline.py) | Feature engineering, walk-forward evaluation of Static, Periodic, Tuned DriftBook, ADWIN, and Regime Router (Experimental) models. | `features(d)`, `run(...)` |
+| [`recorder.py`](../recorder.py) | Live Kraken v2 WebSocket L2 book recorder for BTC/USD at 1 Hz with depth truncation, cross-purging, and 10-minute Snappy Parquet flushes. | `OrderBook`, `OrderBookRecorder`, `main()` |
+| [`count_rows.py`](../count_rows.py) | Diagnostic utility reading Parquet metadata headers to inspect row counts, disk size, and UTC time spans. | `count_collected_rows(directory="data")` |
+| [`dashboard_template.html`](../dashboard_template.html) | High-performance HTML5 Canvas replay dashboard (100% offline, zero external CDN dependencies) supporting all 5 models. | `plot()`, `upd()` |
+| [`dashboard.html`](../dashboard.html) | Standalone dashboard populated with benchmark dataset and model predictions. | Open in browser (`open dashboard.html`) |
+| [`TUNING_AND_EVALUATION_REPORT.md`](../TUNING_AND_EVALUATION_REPORT.md) | Exhaustive tuning grid search on 60% split and out-of-sample held-out 40% benchmarks. | Empirical Evaluation Report |
+| [`explanation.md`](explanation.md) | Comprehensive presentation guide: 60s pitch, function breakdown, design rationales, and Q&A defense. | Technical Documentation |
+| [`STATE.md`](STATE.md) | Milestone tracking log and benchmark performance records. | Project State Tracking |
 
 ---
 

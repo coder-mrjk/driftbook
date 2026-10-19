@@ -54,20 +54,21 @@ def run(mode, X, y, shifts, eval_hours=None, ks_th=0.35, strikes=3, alpha_init=0
     P = np.zeros((n, 3)); Q = np.ones(n); ab = np.zeros(n, bool)
     sc, al, strike, pend, drift, refit, lat, abc = [], alpha_init, 0, None, [], [], [], []
 
-    # Regime Router components
+    # Regime Router components (Experimental: learned strictly from first TR rows)
     if mode == 'router':
-        head0 = fit(0, TR)
-        if n >= 7800:
-            head1 = fit(6800, 7800)
-            X_r = np.vstack([X[:TR, [5]], X[6800:7800, [5]]])
-            y_r = np.hstack([np.zeros(TR), np.ones(1000)])
-        else:
-            vol_tr = X[:TR, 5]
+        vol_tr = X[:TR-H, 5]
+        q_low = float(np.quantile(vol_tr, 1/3))
+        q_high = float(np.quantile(vol_tr, 2/3))
+        idx_low = np.where(vol_tr <= q_low)[0]
+        idx_high = np.where(vol_tr >= q_high)[0]
+        if len(idx_low) < 50 or len(np.unique(y[idx_low])) < 2:
             med_vol = float(np.median(vol_tr))
-            h1_idx = np.where(vol_tr > med_vol)[0]
-            head1 = GBM(**KW).fit(X[h1_idx[:max(50, len(h1_idx)-H)]], y[h1_idx[:max(50, len(h1_idx)-H)]])
-            X_r = X[:TR, [5]]
-            y_r = (vol_tr > med_vol).astype(int)
+            idx_low = np.where(vol_tr <= med_vol)[0]
+            idx_high = np.where(vol_tr > med_vol)[0]
+        head0 = GBM(**KW).fit(X[idx_low], y[idx_low])
+        head1 = GBM(**KW).fit(X[idx_high], y[idx_high])
+        X_r = np.concatenate([X[idx_low, 5:6], X[idx_high, 5:6]], axis=0)
+        y_r = np.concatenate([np.zeros(len(idx_low)), np.ones(len(idx_high))])
         router_clf = LogisticRegression().fit(X_r, y_r)
 
     # ADWIN Detector components
@@ -77,7 +78,7 @@ def run(mode, X, y, shifts, eval_hours=None, ks_th=0.35, strikes=3, alpha_init=0
     for s in range(TR, n, C):
         e = min(s+C, n); t0 = time.perf_counter()
         if mode == 'router':
-            r_probs = router_clf.predict_proba(X[s:e, [5]])[:, 1]
+            r_probs = router_clf.predict_proba(X[s:e, 5:6])[:, 1]
             p0 = head0.predict_proba(X[s:e])
             p1 = head1.predict_proba(X[s:e])
             p = np.where(r_probs[:, None] < 0.5, p0, p1)
@@ -194,12 +195,12 @@ if __name__ == '__main__':
 
     for k in ['driftbook', 'adwin', 'router']:
         v = models[k]
-        name = "DriftBook (Tuned KS)" if k == 'driftbook' else ("ADWIN" if k == 'adwin' else "Regime Router")
+        name = "DriftBook (Tuned KS)" if k == 'driftbook' else ("ADWIN" if k == 'adwin' else "Regime Router (Exp)")
         if 'regime' in d and 'false_alarms' in v:
-            print(f"{name:20s} detections={v['drift']} delay={v['delay']} false alarms={v['false_alarms']} abstain={v['abstain_rate']:.1%} sel_acc={v['selective_acc']:.3f} coverage={v['coverage']:.3f}")
+            print(f"{name:24s} detections={v['drift']} delay={v['delay']} false alarms={v['false_alarms']} abstain={v['abstain_rate']:.1%} sel_acc={v['selective_acc']:.3f} coverage={v['coverage']:.3f}")
         elif 'drift_detections' in v:
-            print(f"{name:20s} detections={v['drift']} drift_detections={v['drift_detections']} ({v['detections_per_hour']:.2f}/hr) abstain={v['abstain_rate']:.1%} sel_acc={v['selective_acc']:.3f} coverage={v['coverage']:.3f}")
+            print(f"{name:24s} detections={v['drift']} drift_detections={v['drift_detections']} ({v['detections_per_hour']:.2f}/hr) abstain={v['abstain_rate']:.1%} sel_acc={v['selective_acc']:.3f} coverage={v['coverage']:.3f}")
         else:
-            print(f"{name:20s} abstain={v['abstain_rate']:.1%} sel_acc={v['selective_acc']:.3f} coverage={v['coverage']:.3f}")
+            print(f"{name:24s} abstain={v['abstain_rate']:.1%} sel_acc={v['selective_acc']:.3f} coverage={v['coverage']:.3f}")
 
 
