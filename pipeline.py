@@ -12,17 +12,37 @@ from simulate import simulate
 H, C, TR = 5, 100, 3000          # label horizon, chunk size, initial training rows
 F = ['imb1', 'imb5', 'ofi', 'micro', 'spread', 'vol']
 
-def features(d):
+def features(d, tick_size: float = None, verbose: bool = True):
     b = d[[f'b{i}' for i in range(5)]].values; a = d[[f'a{i}' for i in range(5)]].values
     f = pd.DataFrame({'imb1': (b[:,0]-a[:,0])/(b[:,0]+a[:,0]), 'imb5': (b.sum(1)-a.sum(1))/(b.sum(1)+a.sum(1)),
                       'ofi': np.r_[0, np.diff(b[:,0]-a[:,0])], 'spread': d.spread.values})
     f['micro'] = f.spread * f.imb1 / 2
     f['vol'] = d.mid.diff().rolling(50, min_periods=5).std().fillna(0).values
-    dm = (d.mid.shift(-H) - d.mid).values                       # future price change (ticks)
-    y = np.where(dm > .6, 2, np.where(dm < -.6, 0, 1)); y[-H:] = -1   # 0 down, 1 flat, 2 up
+
+    # Determine tick size: 0.1 for real recorded data (timestamp present or price > 10,000), 1.0 for simulated
+    if tick_size is None:
+        tick_size = 0.1 if ('timestamp' in d.columns or d['mid'].iloc[0] > 10000) else 1.0
+
+    # (1) Compute future mid change in price ticks (divide future mid change by tick size)
+    dm = ((d.mid.shift(-H) - d.mid) / tick_size).values
+
+    # Set flat threshold from the training rows only (first TR rows) to prevent look-ahead leakage
+    tr = min(len(d) - H, TR)
+    dm_train = dm[:tr]
+    th = float(np.quantile(np.abs(dm_train), 1/3)) if len(dm_train) > 0 else 0.5
+
+    # 0 down, 1 flat, 2 up; last H rows have unknown future mid (-1)
+    y = np.where(dm > th, 2, np.where(dm < -th, 0, 1))
+    y[-H:] = -1
+
+    if verbose and tr > 0:
+        counts = np.bincount(y[:tr], minlength=3)
+        pcts = counts / tr
+        print(f"Class balance (first {tr} training rows): down={pcts[0]:.1%}, flat={pcts[1]:.1%}, up={pcts[2]:.1%} (flat threshold: {th:.4f} ticks, tick_size: {tick_size})")
+
     return f[F].values, y
 
-def run(mode, X, y, shifts):
+def run(mode, X, y, shifts, eval_hours=None):
     n = len(X)
     def fit(lo, hi, w=False):   # only rows whose label is already known
         kw = {'sample_weight': np.exp(np.linspace(-1.5, 0, hi-H-lo))} if w else {}
@@ -60,25 +80,60 @@ def run(mode, X, y, shifts):
         nxt = [e for e in ends if e >= sh+500 and roll[e] >= pre-.03]; out['rec'].append(nxt[0]-sh if nxt else None)
     if mode == 'driftbook':
         out.update(drift=drift, abst=abc, abstain_rate=ab[idx].mean(), selective_acc=ok[~ab[idx]].mean(),
-                   coverage=(1-P[idx, y[idx]] <= Q[idx]).mean(),
-                   delay=[next((d-sh for d in drift if d >= sh), None) for sh in shifts],
-                   false_alarms=sum(not any(sh <= d <= sh+2000 for sh in shifts) for d in drift))
+                   coverage=(1-P[idx, y[idx]] <= Q[idx]).mean())
+        if shifts:
+            out.update(delay=[next((d-sh for d in drift if d >= sh), None) for sh in shifts],
+                       false_alarms=sum(not any(sh <= d <= sh+2000 for sh in shifts) for d in drift))
+        else:
+            if eval_hours is None:
+                eval_hours = (n - TR) / 3600.0 if n > TR else 0.0
+            out.update(drift_detections=len(drift),
+                       detections_per_hour=round(len(drift) / eval_hours, 2) if eval_hours > 0 else 0.0)
     return out, ends
 
 if __name__ == '__main__':
+    from pathlib import Path
+    tick_size = float(sys.argv[sys.argv.index('--tick-size')+1]) if '--tick-size' in sys.argv else None
     if '--data' in sys.argv:
-        d = pd.read_parquet(sys.argv[sys.argv.index('--data')+1])
+        data_arg = sys.argv[sys.argv.index('--data')+1]
+        p = Path(data_arg)
+        if p.is_dir():
+            files = sorted(p.glob("*.parquet"))
+            d = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+        else:
+            d = pd.read_parquet(data_arg)
         if len(d) < TR + C + H:
             sys.exit(f"Error: Dataset has {len(d)} rows. Walk-forward evaluation requires at least {TR + C + H} rows (TR={TR}, C={C}, H={H}). Collect more data using recorder.py.")
     else:
         d = simulate()
-    X, y = features(d)
+
+    X, y = features(d, tick_size=tick_size)
     sh = [int(i) for i in np.where(np.diff(d.regime.values) != 0)[0] + 1] if 'regime' in d else []
+
+    eval_hours = (len(d) - TR) / 3600.0 if len(d) > TR else 0.0
+    if 'timestamp' in d.columns:
+        try:
+            t0 = pd.to_datetime(d['timestamp'].iloc[TR])
+            t1 = pd.to_datetime(d['timestamp'].iloc[-1])
+            eval_hours = max((t1 - t0).total_seconds() / 3600.0, 1e-6)
+        except Exception:
+            pass
+
     models = {}
-    for k in ['static', 'periodic', 'driftbook']: models[k], ends = run(k, X, y, sh)
+    for k in ['static', 'periodic', 'driftbook']: models[k], ends = run(k, X, y, sh, eval_hours=eval_hours)
     res = dict(n=len(d), shifts=sh, ends=ends, mid=d.mid.values[::50].round(2).tolist(), models=models, **{k: models['driftbook'][k] for k in ['drift', 'abst']}, refit=models['driftbook']['refits'])
     js = json.dumps(res, default=lambda o: o.item() if hasattr(o, 'item') else str(o))
     json.dump(json.loads(js), open('results.json', 'w'), indent=1)
     open('dashboard.html', 'w').write(open('dashboard_template.html').read().replace('__DATA__', js))
-    for k, v in models.items(): print(f"{k:10s} acc={v['acc']:.3f} f1={v['f1']:.3f} mcc={v['mcc']:.3f} post-shift acc={np.round(v['post'],3)} recovery={v['rec']} lat={v['lat_ms']:.3f}ms")
-    v = models['driftbook']; print('detections', v['drift'], 'delay', v['delay'], 'false alarms', v['false_alarms'], 'abstain', round(v['abstain_rate'], 3), 'selective acc', round(v['selective_acc'], 3), 'coverage', round(v['coverage'], 3))
+    for k, v in models.items():
+        if 'regime' in d:
+            print(f"{k:10s} acc={v['acc']:.3f} f1={v['f1']:.3f} mcc={v['mcc']:.3f} post-shift acc={np.round(v['post'],3)} recovery={v['rec']} lat={v['lat_ms']:.3f}ms")
+        else:
+            print(f"{k:10s} acc={v['acc']:.3f} f1={v['f1']:.3f} mcc={v['mcc']:.3f} lat={v['lat_ms']:.3f}ms")
+
+    v = models['driftbook']
+    if 'regime' in d:
+        print('detections', v['drift'], 'delay', v['delay'], 'false alarms', v['false_alarms'], 'abstain', round(v['abstain_rate'], 3), 'selective acc', round(v['selective_acc'], 3), 'coverage', round(v['coverage'], 3))
+    else:
+        print('drift detections', v['drift_detections'], 'detections per hour', v['detections_per_hour'], 'detections', v['drift'], 'abstain', round(v['abstain_rate'], 3), 'selective acc', round(v['selective_acc'], 3), 'coverage', round(v['coverage'], 3))
+
