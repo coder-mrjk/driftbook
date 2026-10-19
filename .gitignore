@@ -12,3 +12,6 @@ __pycache__/
 # Data & Logs
 *.log
 
+# Sensitive / Temporary / Competition Exports
+Claude-Hackathon ideas and team branding for competitions-20261018-1441.md
+Perceptron_Hackathon_by_optive_PS.pdf
